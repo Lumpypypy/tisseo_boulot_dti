@@ -128,10 +128,11 @@ const BUS=[
   {line:'18',to:'Fleming',ride:'ride18',walk:'walkFleming'}
 ];
 const LOCAL=location.protocol.startsWith('http')&&/^(localhost|127\.0\.0\.1)$/.test(location.hostname);
-const RELAY='https://1be5e42f.tisseo-relais.pages.dev'; // colle ici l'adresse de ton Worker, ex. 'https://tisseo-relais.monpseudo.workers.dev'
+const RELAY='https://1be5e42f.tisseo-relais.pages.dev'; // relais Cloudflare
 const DEF={mode:(LOCAL||RELAY)?'live':'demo',key:'',base:LOCAL?'/api':(RELAY||'https://api.tisseo.fr/v2'),walkHome:8,metro:24,transfer:4,ride25:12,ride21:12,ride18:15,walkVandel:5,walkFleming:5};
 let S={...DEF};
 try{const r=localStorage.getItem('trajet-dgac');if(r)S={...DEF,...JSON.parse(r)}}catch(e){}
+if(RELAY&&!LOCAL){S.base=RELAY;S.mode=S.mode||'live'}
 const save=()=>{try{localStorage.setItem('trajet-dgac',JSON.stringify(S))}catch(e){}};
 
 const $=s=>document.querySelector(s);
