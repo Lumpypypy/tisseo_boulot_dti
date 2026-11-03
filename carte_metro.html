@@ -43,6 +43,9 @@ button.lt[aria-pressed="false"]{opacity:.5}
 .banner.sim{border-color:var(--muted);color:var(--muted)}
 #map{flex:1;min-height:0;width:100%;background:var(--bg)}
 .leaflet-container{font-family:var(--body)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.9)}}
+:root[data-theme="dark"] .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.9)}
+
 .stlabel{background:var(--card);color:var(--fg);border:1px solid var(--line);box-shadow:none;padding:1px 5px;font-size:12px;font-weight:500}
 .stlabel::before{display:none}
 .nolabels .stlabel{display:none}
@@ -340,10 +343,9 @@ let map,netLayer,trainLayer,stLayer;
 const visible={A:true,B:true};
 function initMap(){
   map=L.map('map',{zoomControl:true,attributionControl:true}).setView([43.6045,1.4440],12);
-  const dark=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches;
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/'+(dark?'dark_all':'light_all')+'/{z}/{x}/{y}{r}.png',{
-    maxZoom:19,subdomains:'abcd',
-    attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    maxZoom:19,
+    attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
   }).addTo(map);
   netLayer=L.layerGroup().addTo(map);stLayer=L.layerGroup().addTo(map);trainLayer=L.layerGroup().addTo(map);
   const lab=()=>$('#map').classList.toggle('nolabels',map.getZoom()<14);
