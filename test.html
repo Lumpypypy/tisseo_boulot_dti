@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tableau de bord Garmin</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f4f9; padding: 20px; text-align: center; }
+    .card { background: white; padding: 20px; border-radius: 12px; max-width: 400px; margin: auto; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    h1 { font-size: 1.5rem; color: #333; }
+    .stat { font-size: 2rem; font-weight: bold; color: #0070f3; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Dernière course Garmin</h1>
+    <div id="loading">Chargement des données...</div>
+    <div id="content" style="display:none;">
+      <p>Distance : <span id="distance" class="stat">--</span> km</p>
+      <p>Allure : <span id="pace">--</span> min/km</p>
+      <p>Dénivelé : <span id="elevation">--</span> m</p>
+    </div>
+  </div>
+
+  <script>
+    // Remplacez cette URL par l'URL exacte de votre Worker Cloudflare (*.workers.dev)
+    const WORKER_URL = "https://garmin-web-worker.votre-nom.workers.dev";
+
+    async function loadStats() {
+      try {
+        const response = await fetch(WORKER_URL);
+        const data = await response.json();
+        
+        if (data.last_run) {
+          document.getElementById('distance').innerText = data.last_run.distance_km;
+          document.getElementById('pace').innerText = data.last_run.avg_pace_min_km;
+          document.getElementById('elevation').innerText = data.last_run.elevation_gain_m;
+          document.getElementById('loading').style.display = 'none';
+          document.getElementById('content').style.display = 'block';
+        } else {
+          document.getElementById('loading').innerText = "Aucune course trouvée.";
+        }
+      } catch (err) {
+        document.getElementById('loading').innerText = "Erreur de connexion à l'API.";
+      }
+    }
+
+    loadStats();
+  </script>
+</body>
+</html>
