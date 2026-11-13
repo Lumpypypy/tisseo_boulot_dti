@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Garmin – Tableau de bord</title>
+  <style>
+    /* Style pensé pour écran e-ink : noir et blanc, gros caractères, pas d'animation */
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 16px; background: #fff; color: #000; font-family: Arial, Helvetica, sans-serif; }
+    .wrap { max-width: 900px; margin: 0 auto; }
+    header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 4px solid #000; padding-bottom: 6px; margin-bottom: 14px; }
+    header h1 { font-size: 22px; margin: 0; }
+    header span { font-size: 14px; }
+    section { border: 3px solid #000; padding: 12px 14px; margin-bottom: 14px; }
+    h2 { font-size: 16px; margin: 0 0 10px; text-transform: uppercase; letter-spacing: 1px; }
+    .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .big { font-size: 34px; font-weight: bold; line-height: 1.1; }
+    .lbl { font-size: 13px; }
+    .sub { font-size: 14px; margin-top: 6px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .bar { height: 22px; border: 2px solid #000; position: relative; margin: 8px 0 4px; }
+    .bar .fill { position: absolute; top: 0; bottom: 0; left: 0; background: #000; }
+    .bar .zone { position: absolute; top: -6px; bottom: -6px; border-left: 3px solid #000; border-right: 3px solid #000; }
+    .muted { font-size: 12px; }
+    details { margin-top: 10px; font-size: 13px; }
+    details input, details select { padding: 5px; border: 2px solid #000; background: #fff; margin: 3px 0 8px; width: 100%; }
+    button { border: 3px solid #000; background: #fff; color: #000; padding: 6px 12px; font-weight: bold; cursor: pointer; }
+    #err { font-weight: bold; border: 3px solid #000; padding: 8px; margin-bottom: 14px; display: none; }
+    pre { font-size: 11px; max-height: 260px; overflow: auto; border: 2px solid #000; padding: 6px; }
+    @media (max-width: 640px) { .grid4 { grid-template-columns: 1fr 1fr; } .grid2 { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>GARMIN</h1>
+    <span id="updated">–</span>
+  </header>
+
+  <div id="err"></div>
+
+  <section>
+    <h2>Dernière activité</h2>
+    <div id="last-name" class="sub" style="margin:0 0 8px">–</div>
+    <div class="grid4">
+      <div><div class="big" id="l-date">–</div><div class="lbl">Date</div></div>
+      <div><div class="big" id="l-dist">–</div><div class="lbl">Distance</div></div>
+      <div><div class="big" id="l-time">–</div><div class="lbl">Temps</div></div>
+      <div><div class="big" id="l-pace">–</div><div class="lbl" id="l-pace-lbl">Allure moy.</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Distance par semaine – 10 dernières semaines</h2>
+    <div id="chart"></div>
+  </section>
+
+  <section>
+    <h2>Récupération et état</h2>
+    <div class="grid2">
+      <div>
+        <div class="big" id="r-hours">–</div>
+        <div class="lbl">Récupération recommandée</div>
+        <div class="muted" id="r-note"></div>
+        <div class="sub">Dernière nuit – VFC : <b id="r-hrv">–</b></div>
+      </div>
+      <div>
+        <div class="lbl">Charge des 7 derniers jours (<span id="c-metric">–</span>)</div>
+        <div class="big" id="c-val">–</div>
+        <div class="bar"><div class="fill" id="c-fill"></div><div class="zone" id="c-zone"></div></div>
+        <div class="sub" id="c-text">–</div>
+        <div class="muted">Zone encadrée = charge conseillée (estimée sur vos 4 dernières semaines, pas une valeur Garmin).</div>
+      </div>
+    </div>
+  </section>
+
+  <details id="settings">
+    <summary>Réglages</summary>
+    <label>URL du worker</label><input id="url" placeholder="https://xxxx.workers.dev">
+    <label>Clé d'application (APP_KEY)</label><input id="key" type="password">
+    <label>Type d'activité pour le graphique</label>
+    <select id="type">
+      <option value="all">Toutes</option>
+      <option value="running">Course à pied</option>
+      <option value="cycling">Vélo</option>
+      <option value="walking">Marche</option>
+      <option value="swimming">Natation</option>
+    </select>
+    <button id="save">Enregistrer et actualiser</button>
+    <button id="dbg">Voir les données brutes</button>
+    <pre id="raw" style="display:none"></pre>
+  </details>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+                set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+
+$("url").value = store.get("gd_url") || "";
+$("key").value = store.get("gd_key") || "";
+$("type").value = store.get("gd_type") || "all";
+
+let lastRaw = {};
+
+const pad = (n) => String(n).padStart(2, "0");
+const fmtDay = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+function parseLocal(s) { // "2026-11-12 07:30:00"
+  const m = /(\d{4})-(\d{2})-(\d{2})/.exec(s || "");
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+}
+function mondayOf(d) {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+  return x;
+}
+function fmtDuration(sec) {
+  sec = Math.round(sec);
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return h > 0 ? `${h}h${pad(m)}` : `${m}:${pad(s)}`;
+}
+function fmtPace(secPerKm) {
+  const m = Math.floor(secPerKm / 60), s = Math.round(secPerKm % 60);
+  return `${m}:${pad(s)}/km`;
+}
+const typeKey = (a) => (a.activityType && a.activityType.typeKey) || "";
+const matchesType = (a, t) => t === "all" || typeKey(a).includes(t);
+
+async function api(route, params) {
+  const base = $("url").value.replace(/\/$/, "");
+  const res = await fetch(`${base}/api/${route}?${new URLSearchParams(params)}`, { headers: { "X-App-Key": $("key").value } });
+  const data = await res.json();
+  if (!res.ok) throw new Error((data.error || res.status) + (data.details ? " – " + data.details : ""));
+  return data;
+}
+
+async function loadActivities() {
+  const since = new Date(); since.setDate(since.getDate() - 70);
+  let all = [];
+  for (let start = 0; start < 500; start += 100) {
+    const page = await api("activities", { limit: 100, start, startDate: fmtDay(since) });
+    if (!Array.isArray(page)) break;
+    all = all.concat(page);
+    if (page.length < 100) break;
+  }
+  return all;
+}
+
+function renderLast(acts) {
+  const a = acts[0];
+  if (!a) return;
+  const d = parseLocal(a.startTimeLocal);
+  $("last-name").textContent = a.activityName || typeKey(a);
+  $("l-date").textContent = d ? `${pad(d.getDate())}/${pad(d.getMonth() + 1)}` : "–";
+  const km = (a.distance || 0) / 1000;
+  $("l-dist").textContent = km ? km.toFixed(2) + " km" : "–";
+  $("l-time").textContent = a.duration ? fmtDuration(a.duration) : "–";
+  const pace = /running|walking|hiking/.test(typeKey(a));
+  if (km && a.duration) {
+    if (pace) { $("l-pace").textContent = fmtPace(a.duration / km); $("l-pace-lbl").textContent = "Allure moy."; }
+    else { $("l-pace").textContent = (km / (a.duration / 3600)).toFixed(1) + " km/h"; $("l-pace-lbl").textContent = "Vitesse moy."; }
+  }
+}
+
+function renderChart(acts) {
+  const t = $("type").value;
+  const thisMonday = mondayOf(new Date());
+  const weeks = [];
+  for (let i = 9; i >= 0; i--) { const d = new Date(thisMonday); d.setDate(d.getDate() - 7 * i); weeks.push({ key: fmtDay(d), label: `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`, km: 0 }); }
+  const idx = Object.fromEntries(weeks.map((w, i) => [w.key, i]));
+  acts.filter((a) => matchesType(a, t)).forEach((a) => {
+    const d = parseLocal(a.startTimeLocal); if (!d) return;
+    const k = fmtDay(mondayOf(d));
+    if (k in idx) weeks[idx[k]].km += (a.distance || 0) / 1000;
+  });
+  const max = Math.max(10, ...weeks.map((w) => w.km));
+  const W = 800, H = 240, left = 10, bottom = 34, top = 22, bw = (W - left * 2) / weeks.length;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Distance par semaine">`;
+  svg += `<line x1="${left}" y1="${H - bottom}" x2="${W - left}" y2="${H - bottom}" stroke="#000" stroke-width="3"/>`;
+  weeks.forEach((w, i) => {
+    const h = (w.km / max) * (H - bottom - top);
+    const x = left + i * bw + bw * 0.15, bwid = bw * 0.7, y = H - bottom - h;
+    svg += `<rect x="${x}" y="${y}" width="${bwid}" height="${Math.max(h, 0)}" fill="#000"/>`;
+    svg += `<text x="${x + bwid / 2}" y="${y - 5}" font-size="15" font-weight="bold" text-anchor="middle">${w.km ? w.km.toFixed(w.km >= 100 ? 0 : 1) : ""}</text>`;
+    svg += `<text x="${x + bwid / 2}" y="${H - 12}" font-size="13" text-anchor="middle">${w.label}</text>`;
+  });
+  svg += `</svg><div class="muted">Distance en km, semaines du lundi au dimanche (date = lundi).</div>`;
+  $("chart").innerHTML = svg;
+}
+
+function renderLoad(acts) {
+  const hasLoad = acts.some((a) => typeof a.activityTrainingLoad === "number");
+  const val = (a) => hasLoad ? (a.activityTrainingLoad || 0) : (a.distance || 0) / 1000;
+  $("c-metric").textContent = hasLoad ? "charge d'entraînement" : "km, charge non fournie";
+  const now = new Date();
+  const dayAgo = (a) => { const d = parseLocal(a.startTimeLocal); return d ? (now - d) / 86400000 : 999; };
+  const load7 = acts.filter((a) => dayAgo(a) < 7).reduce((s, a) => s + val(a), 0);
+  const load28 = acts.filter((a) => dayAgo(a) < 28).reduce((s, a) => s + val(a), 0);
+  const avg = load28 / 4;
+  const lo = avg * 0.8, hi = avg * 1.3;
+  const scale = Math.max(hi * 1.25, load7 * 1.05, 1);
+  const unit = hasLoad ? "" : " km";
+  $("c-val").textContent = Math.round(load7 * 10) / 10 + unit;
+  $("c-fill").style.width = Math.min(100, (load7 / scale) * 100) + "%";
+  $("c-zone").style.left = (lo / scale) * 100 + "%";
+  $("c-zone").style.width = ((hi - lo) / scale) * 100 + "%";
+  let verdict = "dans la zone conseillée";
+  if (avg === 0) verdict = "pas assez de données";
+  else if (load7 < lo) verdict = "en dessous de la zone : vous pouvez en faire plus";
+  else if (load7 > hi) verdict = "au-dessus de la zone : prévoyez du repos";
+  $("c-text").textContent = `Zone conseillée : ${Math.round(lo)}–${Math.round(hi)}${unit} par semaine – ${verdict}`;
+
+  // Récupération : on cherche un champ Garmin éventuel, sinon on l'indique
+  const a = acts[0] || {};
+  const rec = a.recoveryTime ?? a.recoveryTimeInHours ?? a.recoveryHours ?? null;
+  if (rec != null) { $("r-hours").textContent = Math.round(rec) + " h"; }
+  else { $("r-hours").textContent = "n/d"; $("r-note").textContent = "Cette valeur n'est pas fournie par la Personal API."; }
+}
+
+function deepFind(obj, key) {
+  if (obj && typeof obj === "object") {
+    if (key in obj) return obj[key];
+    for (const v of Object.values(obj)) { const r = deepFind(v, key); if (r !== undefined) return r; }
+  }
+}
+
+async function loadHrv() {
+  try {
+    const d = new Date(); d.setDate(d.getDate() - 3);
+    const data = await api("hrv", { startDate: fmtDay(d), endDate: fmtDay(new Date()) });
+    lastRaw.hrv = data;
+    const list = data.hrvSummaries || (Array.isArray(data) ? data : null);
+    const src = list && list.length ? list[list.length - 1] : data;
+    const v = deepFind(src, "lastNightAvg");
+    const s = deepFind(src, "status");
+    $("r-hrv").textContent = v != null ? `${v} ms${s ? " (" + String(s).toLowerCase() + ")" : ""}` : "n/d";
+  } catch { $("r-hrv").textContent = "n/d"; }
+}
+
+async function refresh() {
+  $("err").style.display = "none";
+  if (!$("url").value || !$("key").value) { $("settings").open = true; return; }
+  try {
+    const acts = await loadActivities();
+    lastRaw.activities = acts.slice(0, 3);
+    acts.sort((x, y) => (y.startTimeLocal || "").localeCompare(x.startTimeLocal || ""));
+    renderLast(acts);
+    renderChart(acts);
+    renderLoad(acts);
+    await loadHrv();
+    const n = new Date();
+    $("updated").textContent = `Mis à jour ${pad(n.getDate())}/${pad(n.getMonth() + 1)} ${pad(n.getHours())}:${pad(n.getMinutes())}`;
+  } catch (e) {
+    $("err").textContent = "Erreur : " + e.message;
+    $("err").style.display = "block";
+  }
+}
+
+$("save").onclick = () => { store.set("gd_url", $("url").value.trim()); store.set("gd_key", $("key").value); store.set("gd_type", $("type").value); refresh(); };
+$("dbg").onclick = () => { const p = $("raw"); p.style.display = "block"; p.textContent = JSON.stringify(lastRaw, null, 2); };
+
+refresh();
+setInterval(refresh, 30 * 60 * 1000); // actualisation toutes les 30 min
+</script>
+</body>
+</html>
