@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Test Garmin Worker</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    h1 { font-size: 1.4rem; }
+    label { display: block; margin: .6rem 0 .2rem; font-size: .85rem; color: #555; }
+    input { width: 100%; padding: .5rem; box-sizing: border-box; border: 1px solid #bbb; border-radius: 6px; }
+    .row { display: flex; gap: .5rem; flex-wrap: wrap; margin: 1rem 0; }
+    button { padding: .5rem .9rem; border: 0; border-radius: 6px; background: #007cc3; color: #fff; cursor: pointer; }
+    button:hover { background: #005f96; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .6rem; margin: 1rem 0; }
+    .card { background: #f3f6f9; border-radius: 8px; padding: .8rem; }
+    .card b { display: block; font-size: 1.3rem; }
+    .card span { font-size: .8rem; color: #666; }
+    pre { background: #111; color: #cfe; padding: 1rem; border-radius: 8px; overflow: auto; max-height: 420px; font-size: .8rem; }
+    .err { color: #b00020; }
+  </style>
+</head>
+<body>
+  <h1>Test du worker Garmin (Personal API)</h1>
+
+  <label for="url">URL du worker</label>
+  <input id="url" value="http://localhost:8787">
+
+  <label for="key">Clé d'application (APP_KEY)</label>
+  <input id="key" type="password" placeholder="votre clé secrète">
+
+  <label for="date">Date (sommeil)</label>
+  <input id="date" type="date">
+
+  <div class="row">
+    <button data-route="profile">Profil</button>
+    <button data-route="activities">10 dernières activités</button>
+    <button data-route="sleep">Sommeil</button>
+    <button data-route="steps">Pas (7 jours)</button>
+    <button data-route="hrv">VFC / HRV (7 jours)</button>
+    <button data-route="stress">Stress (7 jours)</button>
+  </div>
+
+  <div id="cards" class="cards"></div>
+  <div id="status"></div>
+  <pre id="out">Cliquez sur un bouton pour interroger le worker.</pre>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  $("date").value = new Date().toISOString().slice(0, 10);
+
+  try {
+    $("url").value = localStorage.getItem("gw_url") || $("url").value;
+    $("key").value = localStorage.getItem("gw_key") || "";
+  } catch {}
+
+  const card = (label, value) => `<div class="card"><b>${value ?? "–"}</b><span>${label}</span></div>`;
+
+  // Cartes simples : les noms de champs exacts dépendent de Garmin, le JSON brut est affiché dessous
+  function showCards(route, data) {
+    let html = "";
+    if (route === "activities" && Array.isArray(data)) {
+      html = card("Activités récupérées", data.length);
+      data.slice(0, 5).forEach((a) => {
+        html += card(
+          `${a.activityName ?? "Activité"} (${(a.startTimeLocal || "").slice(0, 10)})`,
+          a.distance != null ? (a.distance / 1000).toFixed(1) + " km" : "–"
+        );
+      });
+    } else if (Array.isArray(data)) {
+      html = card("Éléments reçus", data.length);
+    } else if (data && typeof data === "object") {
+      html = card("Champs reçus", Object.keys(data).length);
+    }
+    $("cards").innerHTML = html;
+  }
+
+  async function call(route) {
+    const base = $("url").value.replace(/\/$/, "");
+    const key = $("key").value;
+    try {
+      localStorage.setItem("gw_url", base);
+      localStorage.setItem("gw_key", key);
+    } catch {}
+
+    const params = new URLSearchParams();
+    if (route === "sleep") params.set("date", $("date").value);
+    if (route === "activities") params.set("limit", "10");
+
+    $("status").innerHTML = "Chargement…";
+    $("cards").innerHTML = "";
+    try {
+      const res = await fetch(`${base}/api/${route}?${params}`, { headers: { "X-App-Key": key } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error + (data.details ? " — " + data.details : ""));
+      $("status").innerHTML = `<span>✅ OK (${res.status})</span>`;
+      showCards(route, data);
+      $("out").textContent = JSON.stringify(data, null, 2);
+    } catch (e) {
+      $("status").innerHTML = `<span class="err">❌ ${e.message}</span>`;
+      $("out").textContent = "";
+    }
+  }
+
+  document.querySelectorAll("button[data-route]").forEach((b) =>
+    b.addEventListener("click", () => call(b.dataset.route))
+  );
+</script>
+</body>
+</html>
